@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+state/*.csv
+state/*.json
+!state/.gitkeep
+public/data/market_history.csv
+public/data/latest_snapshot.csv
+public/data/stock_master.csv
+public/data/quality.json
+public/data/export_errors.csv
+.DS_Store
+.eod_fast_path

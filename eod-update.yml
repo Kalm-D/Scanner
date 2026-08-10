@@ -1,0 +1,109 @@
+name: Stock EOD Update + Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      allow_stale:
+        description: "Cho phép publish phiên gần nhất dù không phải hôm nay (dùng để test thủ công/ngày nghỉ)"
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: '20 16 * * 1-5'
+      timezone: 'Asia/Ho_Chi_Minh'
+    - cron: '45 16 * * 1-5'
+      timezone: 'Asia/Ho_Chi_Minh'
+    - cron: '10 17 * * 1-5'
+      timezone: 'Asia/Ho_Chi_Minh'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: stock-eod-pages
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  TZ: 'Asia/Ho_Chi_Minh'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Set up Node.js for HTML checks
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: HTML + cloud loader checks
+        run: python tests/check_html_js.py
+
+      - name: Restore latest EOD state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: stock-eod-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            stock-eod-${{ runner.os }}-
+
+      - name: Run EOD engine (scheduled)
+        if: github.event_name == 'schedule'
+        run: python src/cloud_eod.py --require-today
+
+      - name: Run EOD engine (manual)
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          if [[ "${{ inputs.allow_stale }}" == "true" ]]; then
+            python src/cloud_eod.py
+          else
+            python src/cloud_eod.py --require-today
+          fi
+
+      - name: Save EOD state cache
+        if: success() && hashFiles('.eod_fast_path') == ''
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: stock-eod-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Configure GitHub Pages
+        if: success()
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        if: success()
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./public
+
+  deploy:
+    if: success()
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
