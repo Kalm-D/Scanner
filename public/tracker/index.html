@@ -4378,6 +4378,30 @@ body.t140-soft-theme{background:#e9eef3!important;color:#14253b!important}.t140-
   .topbar .actions { justify-content: flex-start !important; }
 }
 
+/* Compact sticky headline while browsing the tracker on desktop. */
+@media (min-width: 721px) {
+  body.tracker-header-compact .topbar {
+    grid-template-columns: minmax(360px, 1fr) minmax(280px, 360px) !important;
+    grid-template-areas: "search market" !important;
+    gap: 12px !important;
+    padding: 8px 14px !important;
+    border-radius: 0 0 18px 18px !important;
+  }
+  body.tracker-header-compact .brand-top,
+  body.tracker-header-compact .topbar .actions {
+    display: none !important;
+  }
+  body.tracker-header-compact .header-search input {
+    padding: 10px 14px !important;
+  }
+  body.tracker-header-compact .header-market {
+    padding: 7px 12px !important;
+  }
+  body.tracker-header-compact .market-sub {
+    font-size: 11px !important;
+  }
+}
+
 </style>
 </head>
 <body class="tracker-app-v127">
@@ -7837,6 +7861,16 @@ return{SCHEMA_VERSION,validateOHLCV,applyAdjustmentFactors,pointInTime,lookAhead
       } catch (error) {
         console.warn("Shared market data chưa sẵn sàng; giữ dataset demo.", error);
       }
+    })();
+  </script>
+
+  <script id="trackerHeaderLayout">
+    (() => {
+      const syncCompactHeader = () => {
+        document.body.classList.toggle("tracker-header-compact", window.scrollY > 96);
+      };
+      window.addEventListener("scroll", syncCompactHeader, { passive: true });
+      syncCompactHeader();
     })();
   </script>
 
