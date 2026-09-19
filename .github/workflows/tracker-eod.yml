@@ -1,0 +1,88 @@
+name: Tracker EOD data and GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # 15:00 Vietnam time (UTC+7), Monday-Friday.
+    - cron: "0 15 * * 1-5"
+      timezone: "Asia/Ho_Chi_Minh"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: tracker-eod-pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python for the scheduled refresh
+        if: github.event_name != 'push'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install data dependencies
+        if: github.event_name != 'push'
+        run: python -m pip install --upgrade pip pandas vnstock
+
+      - name: Download 320 sessions from the shared source
+        if: github.event_name != 'push'
+        timeout-minutes: 330
+        run: >-
+          python tracker-tools/tracker_data_exporter.py
+          --sessions 320
+          --output work/market.csv
+          --errors-output work/export_errors.csv
+          --quality-output work/export_quality.csv
+          --sleep 3.6
+          --retry-sleep 70
+          --save-every 25
+          --source KBS
+
+      - name: Pack one shared snapshot for Tracker and Alpha Stock
+        if: github.event_name != 'push'
+        run: >-
+          python tracker-tools/pack_market_data.py
+          --input work/market.csv
+          --output public/tracker/data/market.json
+          --source "Vnstock / KBS"
+
+      - name: Commit refreshed shared data
+        if: github.event_name != 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/tracker/data/market.json
+          if git diff --cached --quiet; then
+            echo "No market data change to commit."
+          else
+            git commit -m "data: refresh shared market snapshot"
+            git push
+          fi
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the public site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
