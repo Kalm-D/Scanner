@@ -1,5 +1,6 @@
 (function (root) {
   "use strict";
+  const LIVE_CACHE_KEY = "tracker.shared.live.v1";
 
   function finite(value, fallback = 0) {
     const n = Number(value);
@@ -70,11 +71,39 @@
     return now.toISOString().slice(0, 10);
   }
 
+  function mergeRows(baseRows, extraRows) {
+    const merged = new Map(baseRows.map(row => [`${row.ticker}|${row.date}`, row]));
+    for (const row of extraRows) merged.set(`${row.ticker}|${row.date}`, row);
+    return [...merged.values()].sort((a, b) => `${a.ticker}|${a.date}`.localeCompare(`${b.ticker}|${b.date}`));
+  }
+
+  function readLiveCache() {
+    try {
+      const raw = root.localStorage?.getItem(LIVE_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && Array.isArray(parsed.rows) ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeLiveCache(rows, meta, publishedDate) {
+    try {
+      const liveRows = rows.filter(row => String(row.date) > String(publishedDate || ""));
+      if (!liveRows.length) return;
+      root.localStorage?.setItem(LIVE_CACHE_KEY, JSON.stringify({
+        meta: { asOf: meta?.asOf || "", source: meta?.liveSource || "VNDIRECT public API", cachedAt: new Date().toISOString() },
+        rows: liveRows
+      }));
+    } catch (_) {}
+  }
+
   async function refreshLatest(result) {
     const asOf = String(result.meta?.asOf || "").slice(0, 10);
     const expected = expectedTradingDate();
     if (asOf && asOf >= expected) {
-      result.meta = { ...result.meta, expectedTradingDate: expected, refreshedOnOpen: false, freshness: "current" };
+      result.meta = { ...result.meta, expectedTradingDate: expected, refreshedOnOpen: Boolean(result.meta?.cachedOnOpen), freshness: "current" };
       return result;
     }
 
@@ -108,6 +137,7 @@
     result.rows = [...merged.values()].sort((a, b) => `${a.ticker}|${a.date}`.localeCompare(`${b.ticker}|${b.date}`));
     const latest = result.rows.reduce((max, row) => row.date > max ? row.date : max, "");
     result.meta = { ...result.meta, asOf: latest || result.meta?.asOf, expectedTradingDate: expected, refreshedOnOpen: latest > asOf, freshness: latest >= expected ? "current" : "stale", liveSource: "VNDIRECT public API" };
+    writeLiveCache(result.rows, result.meta, asOf);
     return result;
   }
 
@@ -140,6 +170,15 @@
     const payload = await response.json();
     const result = inflate(payload);
     result.meta = { ...(result.meta || {}), url: absolute, loadedAt: new Date().toISOString() };
+    const cached = readLiveCache();
+    const publishedDate = String(result.meta?.asOf || "").slice(0, 10);
+    if (cached?.rows?.length) {
+      const cachedRows = cached.rows.filter(row => String(row.date) > publishedDate);
+      if (cachedRows.length) {
+        result.rows = mergeRows(result.rows, cachedRows);
+        result.meta = { ...result.meta, asOf: cached.meta?.asOf || result.meta?.asOf, cachedOnOpen: true, liveSource: cached.meta?.source || "VNDIRECT public API" };
+      }
+    }
     return refreshLatest(result);
   }
 
