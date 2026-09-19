@@ -58,7 +58,7 @@ jobs:
         run: >-
           python tracker-tools/pack_market_data.py
           --input work/market.csv
-          --output public/tracker/data/market.json
+          --output public/tracker/data/market.json.gz
           --source "Vnstock / KBS"
 
       - name: Commit refreshed shared data
@@ -66,7 +66,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/tracker/data/market.json
+            git add public/tracker/data/market.json.gz
           if git diff --cached --quiet; then
             echo "No market data change to commit."
           else
@@ -85,4 +85,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-

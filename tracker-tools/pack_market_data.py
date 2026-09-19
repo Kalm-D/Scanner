@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,7 +83,12 @@ def main() -> int:
         "symbols": symbols,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if output_path.suffix.lower() == ".gz":
+        with gzip.open(output_path, "wt", encoding="utf-8") as handle:
+            handle.write(serialized)
+    else:
+        output_path.write_text(serialized, encoding="utf-8")
     # Keep CLI output ASCII-safe on Windows runners with a legacy code page.
     print(json.dumps(payload["meta"], ensure_ascii=True))
     return 0
@@ -90,4 +96,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

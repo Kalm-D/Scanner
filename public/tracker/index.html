@@ -7765,7 +7765,7 @@ return{SCHEMA_VERSION,validateOHLCV,applyAdjustmentFactors,pointInTime,lookAhead
   <script>
     (async () => {
       try {
-        const sourceUrl = window.SHARED_MARKET_DATA_URL || "./data/market.json";
+        const sourceUrl = window.SHARED_MARKET_DATA_URL || "./data/market.json.gz";
         const shared = await window.SharedMarketData.load(sourceUrl);
         if (shared.rows.length >= 1 && window.TrackerDataBridge?.loadRows) {
           const label = shared.meta?.refreshedOnOpen

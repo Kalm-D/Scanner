@@ -163,11 +163,22 @@
     return { meta: {}, rows: [] };
   }
 
-  async function load(url = "./data/market.json") {
-    const absolute = new URL(url, document.baseURI).href;
-    const response = await fetch(absolute, { cache: "no-store", headers: { Accept: "application/json" } });
+  async function parsePayload(response, absolute) {
+    if (!absolute.endsWith(".gz")) return response.json();
+    if (!("DecompressionStream" in root)) throw new Error("Trình duyệt không hỗ trợ giải nén snapshot giá.");
+    const stream = response.body.pipeThrough(new root.DecompressionStream("gzip"));
+    return new root.Response(stream).json();
+  }
+
+  async function load(url = "./data/market.json.gz") {
+    let absolute = new URL(url, document.baseURI).href;
+    let response = await fetch(absolute, { cache: "no-store", headers: { Accept: "application/json, application/gzip" } });
+    if (!response.ok && absolute.endsWith(".gz")) {
+      absolute = absolute.slice(0, -3);
+      response = await fetch(absolute, { cache: "no-store", headers: { Accept: "application/json" } });
+    }
     if (!response.ok) throw new Error(`Shared market data HTTP ${response.status}`);
-    const payload = await response.json();
+    const payload = await parsePayload(response, absolute);
     const result = inflate(payload);
     result.meta = { ...(result.meta || {}), url: absolute, loadedAt: new Date().toISOString() };
     const cached = readLiveCache();
