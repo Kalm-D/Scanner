@@ -7768,9 +7768,11 @@ return{SCHEMA_VERSION,validateOHLCV,applyAdjustmentFactors,pointInTime,lookAhead
         const sourceUrl = window.SHARED_MARKET_DATA_URL || "./data/market.json";
         const shared = await window.SharedMarketData.load(sourceUrl);
         if (shared.rows.length >= 1 && window.TrackerDataBridge?.loadRows) {
-          const label = shared.meta?.isDemo
-            ? "Dữ liệu mẫu • shared market snapshot"
-            : `Shared market snapshot • ${shared.meta?.asOf || "latest"}`;
+          const label = shared.meta?.refreshedOnOpen
+            ? `VNDIRECT live on-open • ${shared.meta?.asOf || "latest"}`
+            : shared.meta?.isDemo
+              ? "Dữ liệu mẫu • shared market snapshot"
+              : `Shared market snapshot • ${shared.meta?.asOf || "latest"}`;
           window.TrackerDataBridge.loadRows(shared.rows, label);
           window.dispatchEvent(new CustomEvent("shared-market-data-ready", { detail: shared }));
         }
