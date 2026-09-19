@@ -84,12 +84,15 @@
       `https://api-finfo.vndirect.com.vn/v4/stock_prices?sort=date&q=date:gte:${fromDate}&size=3000&page=1`
     ];
     let payload = null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
     for (const url of urls) {
       try {
-        const response = await fetch(url, { cache: "no-store", headers: { Accept: "application/json" } });
+        const response = await fetch(url, { signal: controller.signal, cache: "no-store", headers: { Accept: "application/json" } });
         if (response.ok) { payload = await response.json(); break; }
       } catch (_) {}
     }
+    clearTimeout(timeout);
     const items = Array.isArray(payload) ? payload : payload?.data || payload?.items || payload?.results || [];
     const liveRows = items.map(normalizeProviderRow).filter(Boolean);
     if (!liveRows.length) {
