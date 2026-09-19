@@ -5044,7 +5044,104 @@ body.t140-soft-theme{background:#e9eef3!important;color:#14253b!important}.t140-
         return {
           ...base,
           key: "CAPITULATION",
-          label: "Capitulatio, tone: "warn", staleSessions: NaN };
+          label: "Capitulation / Panic",
+          tone: "bad",
+          riskLevel: "Rất cao",
+          desc: "Chỉ số giảm nhanh, breadth yếu và biến động lớn.",
+          playbook: "Không ưu tiên breakout. Chỉ tạo watchlist RS Survivor, Wyckoff Selling Climax/Spring và chờ test lại."
+        };
+      }
+
+      if (close < m200 && sl200 < 0 && breadth200 < 0.38) {
+        return {
+          ...base,
+          key: "DOWNTREND",
+          label: "Downtrend",
+          tone: "bad",
+          riskLevel: "Cao",
+          desc: "Chỉ số dưới MA200, MA200 dốc xuống và đa số cổ phiếu yếu.",
+          playbook: "Cash mode là mặc định. Chỉ theo dõi RS Survivor, Stage 1 sớm và cổ phiếu giữ cấu trúc tốt."
+        };
+      }
+
+      if (close > m200 && close < m50 && distributionDays >= 4 && (ret20 < -0.03 || breadth50 < 0.42)) {
+        return {
+          ...base,
+          key: "DISTRIBUTION",
+          label: "Distribution / Late Cycle",
+          tone: "warn",
+          riskLevel: "Cao vừa",
+          desc: "Chỉ số còn trên MA200 nhưng mất MA50 và xuất hiện nhiều phiên phân phối.",
+          playbook: "Ưu tiên cảnh báo phân phối, giảm tỷ trọng; chỉ giữ setup A+ có risk nhỏ."
+        };
+      }
+
+      if (close > m50 && m50 > m150 && m150 > m200 && sl50 > 0 && sl200 > 0 && (Number.isNaN(breadth50) || breadth50 >= 0.48)) {
+        return {
+          ...base,
+          key: "UPTREND",
+          label: "Uptrend",
+          tone: "good",
+          riskLevel: "Thuận lợi",
+          desc: "Chỉ số trên MA50/MA150/MA200, MA dài hạn dốc lên và breadth đủ tốt.",
+          playbook: "Ưu tiên Leader, SEPA/VCP, Darvas/Donchian breakout. Mua đuổi vẫn bị chặn bởi Risk Engine."
+        };
+      }
+
+      if ((close > m50 || followThroughLike) && close > m200 * 0.96 && sl20 > 0 && (ret63 > 0 || bounceFromLow63 > 0.10 || breadth50 >= 0.38)) {
+        return {
+          ...base,
+          key: "EARLY_RECOVERY",
+          label: "Early Recovery",
+          tone: "info",
+          riskLevel: "Trung bình",
+          desc: "Thị trường hồi phục sớm, chưa đủ xác nhận như uptrend hoàn chỉnh.",
+          playbook: "Ưu tiên Stage 1→2, Wyckoff Accumulation, RS cải thiện; dùng vị thế nhỏ và stop rõ."
+        };
+      }
+
+      return {
+        ...base,
+        key: "SIDEWAY",
+        label: "Sideway / Neutral",
+        tone: "warn",
+        riskLevel: "Trung bình",
+        desc: "Thị trường chưa có xu hướng rõ. Breakout đơn lẻ dễ nhiễu.",
+        playbook: "Ưu tiên range breakout có volume, Wyckoff Test, RSI(2) Pullback trong cổ phiếu khỏe."
+      };
+    }
+
+    function computeMetrics() {
+      const cfg = settings();
+      const benchmark = state.series.get(cfg.benchmarkTicker);
+      const benchCloses = benchmark ? benchmark.map(x => x.close) : [];
+      const bench3 = ret(benchCloses, 63);
+      const bench6 = ret(benchCloses, 126);
+      const list = [];
+
+      for (const [ticker, arr] of state.series.entries()) {
+        if (ticker === cfg.benchmarkTicker || isBenchmarkOrIndexTicker(ticker)) continue;
+        if (!isPlainStockTicker(ticker)) continue;
+        if (arr.length < 210) continue;
+        const closes = arr.map(x => x.close), highs = arr.map(x => x.high), lows = arr.map(x => x.low), vols = arr.map(x => x.volume);
+        const last = arr.at(-1), close = last.close;
+        const m50 = ma(closes, 50), m150 = ma(closes, 150), m200 = ma(closes, 200);
+        const m200Slope = slopeMA(closes, 200, cfg.slopeDays);
+        const high52 = max(highs.slice(-252)), low52 = min(lows.slice(-252));
+        const highGapPct = high52 ? close / high52 - 1 : NaN;
+        const lowLiftPct = low52 ? close / low52 - 1 : NaN;
+        const avgVol20 = avg(vols.slice(-20));
+        const avgVol50 = avg(vols.slice(-50));
+        const avgValue20B = avg(arr.slice(-20).map(x => x.close * x.volume)) / 1e9;
+        const activeRatio60 = arr.slice(-60).filter(x => x.volume > 0).length / Math.min(60, arr.length);
+        const stock3 = ret(closes, 63), stock6 = ret(closes, 126);
+        const rs3m = Number.isFinite(bench3) ? stock3 - bench3 : stock3;
+        const rs6m = Number.isFinite(bench6) ? stock6 - bench6 : stock6;
+        const rsRaw = (Number.isFinite(rs3m) ? rs3m * 0.45 : 0) + (Number.isFinite(rs6m) ? rs6m * 0.55 : 0);
+        const rsTrend = rs3m - rs6m;
+        const liquidityPass = avgValue20B >= cfg.minValueB && avgVol20 >= cfg.minVol && close >= cfg.minPrice && activeRatio60 >= cfg.minActiveRatio;
+        const trendInfo = trendStage(close, m50, m150, m200, m200Slope, highGapPct, lowLiftPct, cfg);
+        const qualityMeta = state.quality.byTicker.get(ticker) || { status: "UNKNOWN", label: "—", tone: "warn", staleSessions: NaN };
         const baseInfo = detectBase(arr, cfg, avgVol50, m50);
         let breakoutInfo = detectBreakout(arr, cfg, baseInfo.pivot, avgVol50);
         if (qualityMeta.status !== "D0") {
@@ -5053,7 +5150,31 @@ body.t140-soft-theme{background:#e9eef3!important;color:#14253b!important}.t140-
         const stop = riskStop(arr, baseInfo.pivot, close);
         const riskPct = Number.isFinite(stop) && stop < close ? (close - stop) / close : NaN;
         list.push({
-  m.trendPass && !m.leaderPass && m.rsPercentile >= cfg.earlyRS && (m.rsTrend > 0 || m.rs3m > 0);
+          ticker,
+          exchange: last.exchange,
+          sector: last.sector,
+          date: last.date,
+          dataQuality: qualityMeta.status,
+          dataQualityLabel: qualityMeta.label,
+          dataQualityTone: qualityMeta.tone,
+          staleSessions: qualityMeta.staleSessions,
+          close, m50, m150, m200, m200Slope, high52, low52, highGapPct, lowLiftPct,
+          avgVol20, avgVol50, avgValue20B, activeRatio60, liquidityPass,
+          stock3, stock6, rs3m, rs6m, rsRaw, rsTrend,
+          trendStage: trendInfo.stage, trendTone: trendInfo.tone, trendPass: trendInfo.pass,
+          baseStatus: baseInfo.status, baseTone: baseInfo.tone, basePass: baseInfo.pass, pivot: baseInfo.pivot,
+          breakoutStatus: breakoutInfo.status, breakoutTone: breakoutInfo.tone, breakoutPass: breakoutInfo.pass,
+          stop, riskPct, rows: arr
+        });
+      }
+
+      const sortedByRs = [...list].sort((a,b) => a.rsRaw - b.rsRaw);
+      const n = Math.max(1, sortedByRs.length - 1);
+      sortedByRs.forEach((m, idx) => { m.rsPercentile = Math.round((idx / n) * 100); });
+
+      for (const m of list) {
+        m.leaderPass = m.liquidityPass && m.trendPass && m.rsPercentile >= cfg.leaderRS && m.rs3m > 0 && m.rs6m > 0;
+        m.earlyPass = m.liquidityPass && m.trendPass && !m.leaderPass && m.rsPercentile >= cfg.earlyRS && (m.rsTrend > 0 || m.rs3m > 0);
         m.anyRsPass = m.leaderPass || m.earlyPass;
         Object.assign(m, classifyMultiRegimeSetups(m, cfg));
       }
@@ -5075,7 +5196,16 @@ body.t140-soft-theme{background:#e9eef3!important;color:#14253b!important}.t140-
     }
 
     function downDayCount(arr, days, avgVol50) {
-      const sample = arr.slice(-dayow, prevClose) {
+      const sample = arr.slice(-days);
+      let count = 0;
+      for (let i = 1; i < sample.length; i++) {
+        const x = sample[i], prev = sample[i - 1];
+        if (x.close < prev.close && x.volume > avgVol50 * 1.25) count++;
+      }
+      return count;
+    }
+
+    function trueRange(row, prevClose) {
       const a = row.high - row.low;
       const b = Math.abs(row.high - prevClose);
       const c = Math.abs(row.low - prevClose);
@@ -7175,13 +7305,29 @@ body.t140-soft-theme{background:#e9eef3!important;color:#14253b!important}.t140-
     ws.innerHTML=`<section id="t140-overview" class="t140-view"></section><section id="t140-strategy" class="t140-view"></section><section id="t140-watchlist" class="t140-view"></section><section id="t140-portfolio" class="t140-view"></section><section id="t140-research" class="t140-view"></section><section id="t140-alerts" class="t140-view"></section><section id="t140-settings" class="t140-view"></section>`;
     grid.after(ws);
     const bottom=document.createElement('div'); bottom.className='t140-bottomnav'; bottom.id='t140BottomNav'; bottom.innerHTML=`<button data-v="screener"><span class="ico">⌁</span>Lọc</button><button data-v="overview" class="active"><span class="ico">◫</span>Market</button><button data-v="watchlist"><span class="ico">★</span>Watch</button><button data-v="portfolio"><span class="ico">◒</span>Portfolio</button><button data-v="strategy"><span class="ico">⚙</span>Strategy</button>`; document.body.append(bottom);
-    document.querySelectorAll('[data-v]').forEach(b=>b.a200=m.filter(x=>x.close>x.m200).length, breakouts=m.filter(x=>x.breakoutPass||x.sepaBreakoutPass||x.donchianPass).length, leaders=m.filter(x=>x.rsPercentile>=80).length;
+    document.querySelectorAll('[data-v]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.v)));
+    document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault(); switchView('screener'); setTimeout(()=>{const i=document.getElementById('headerTickerSearch'); i?.focus(); i?.select()},30)}});
+    applyTheme(); switchView(data.view);
+  }
+  function switchView(v){
+    data.view=v; const grid=document.querySelector('.app>.grid'); const ws=document.getElementById('tracker140Workspace');
+    const isScreen=v==='screener'; if(grid)grid.style.display=isScreen?'grid':'none'; if(ws)ws.style.display=isScreen?'none':'block';
+    document.querySelectorAll('.t140-view').forEach(x=>x.classList.toggle('active',x.id===`t140-${v}`));
+    document.querySelectorAll('[data-v]').forEach(x=>x.classList.toggle('active',x.dataset.v===v));
+    renderView(v);
+  }
+  function renderView(v){({overview:renderOverview,strategy:renderStrategy,watchlist:renderWatchlist,portfolio:renderPortfolio,research:renderResearch,alerts:renderAlerts,settings:renderSettings}[v]||(()=>{}))()}
+  function renderOverview(){
+    const el=document.getElementById('t140-overview'); if(!el)return; const m=metrics(); const reg=state.marketRegime||{};
+    const above50=m.filter(x=>x.close>x.m50).length, above200=m.filter(x=>x.close>x.m200).length, breakouts=m.filter(x=>x.breakoutPass||x.sepaBreakoutPass||x.donchianPass).length, leaders=m.filter(x=>x.rsPercentile>=80).length;
     const sectors={}; m.forEach(x=>{const k=x.sector||'Khác'; const s=sectors[k]||(sectors[k]={n:0,score:0,rs:0,ret:0,leaders:0});s.n++;s.score+=x.trackerScore||0;s.rs+=x.rsPercentile||0;s.ret+=x.return20Pct||0;if(x.rsPercentile>=80)s.leaders++});
     const sec=Object.entries(sectors).map(([name,s])=>({name,...s,avgScore:s.score/s.n,avgRs:s.rs/s.n,avgRet:s.ret/s.n})).sort((a,b)=>b.avgRs-a.avgRs);
     const top=[...m].sort((a,b)=>(b.trackerScore||0)-(a.trackerScore||0)).slice(0,10);
     const phases=['TÍCH LŨY','TĂNG GIÁ','PHÂN PHỐI','GIẢM GIÁ'].map(p=>[p,m.filter(x=>x.phaseCode===p).length]);
     el.innerHTML=`<div class="t140-grid">
-      ${[["Regime",reg.label||'—',reg.key==='UPTREND'?'good':reg.key==='DOWNTREND'?'bad':'warn'],["Breadth > MA50",m.length?pct(above50/m.length*100,0):'—','info'],["Breadth > MA200",m.length?pct(above200/m.lengtdisplay:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.1)"><span>${p}</span><b>${n}</b></div>`).join('')}<div class="t140-sub" style="margin-top:8px">Leader RS ≥ 80: <b>${leaders}</b></div></div>
+      ${[["Regime",reg.label||'—',reg.key==='UPTREND'?'good':reg.key==='DOWNTREND'?'bad':'warn'],["Breadth > MA50",m.length?pct(above50/m.length*100,0):'—','info'],["Breadth > MA200",m.length?pct(above200/m.length*100,0):'—','info'],["Breakout hiện tại",String(breakouts),'good']].map(x=>`<div class="t140-card t140-col-3"><div class="t140-muted">${x[0]}</div><div class="t140-kpi t140-${x[2]}">${x[1]}</div><div class="t140-sub">${m.length} mã trong universe hiện tại</div></div>`).join('')}
+      <div class="t140-card t140-col-8"><h2>Sector Rotation</h2><div class="t140-sub">Xếp hạng ngành bằng RS trung bình của các mã đang có dữ liệu.</div>${sec.slice(0,10).map(s=>`<div class="t140-sector-row"><div class="t140-sector-name">${esc(s.name)}</div><div class="t140-progress"><span style="width:${Math.max(4,Math.min(100,s.avgRs))}%"></span></div><div class="t140-muted">RS ${num(s.avgRs,0)}</div><div class="${s.avgRet>=0?'t140-good':'t140-bad'}">${pct(s.avgRet)}</div></div>`).join('')||'<div class="t140-empty">Chưa có dữ liệu ngành.</div>'}</div>
+      <div class="t140-card t140-col-4"><h2>4 chu kỳ cổ phiếu</h2><div class="t140-sub">Phân loại thuật toán từ trend, volume và distribution.</div>${phases.map(([p,n])=>`<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(148,163,184,.1)"><span>${p}</span><b>${n}</b></div>`).join('')}<div class="t140-sub" style="margin-top:8px">Leader RS ≥ 80: <b>${leaders}</b></div></div>
       <div class="t140-card t140-col-12"><h2>Top Ranking</h2><div class="t140-sub">Kết hợp Tracker Score, RS, Market Fit, Risk và Volume Ratio.</div><div class="t140-tablewrap"><table class="t140-table"><thead><tr><th>Mã</th><th>Ngành</th><th>Phase</th><th>Score</th><th>RS</th><th>Vol Ratio</th><th>RSI14</th><th>20D</th><th>Setup</th></tr></thead><tbody>${top.map(x=>`<tr><td><b>${x.ticker}</b></td><td>${esc(x.sector)}</td><td>${phasePill(x.phaseCode)}</td><td>${scoreP(x.trackerScore)}</td><td>${num(x.rsPercentile,0)}</td><td>${num(x.volRatio,2)}×</td><td>${num(x.rsi14,1)}</td><td class="${x.return20Pct>=0?'t140-good':'t140-bad'}">${pct(x.return20Pct)}</td><td>${esc(x.setupSummary||'—')}</td></tr>`).join('')}</tbody></table></div></div>
     </div>`;
   }
@@ -7203,7 +7349,11 @@ body.t140-soft-theme{background:#e9eef3!important;color:#14253b!important}.t140-
     document.getElementById('t140DeleteStrategy').onclick=()=>{const v=document.getElementById('t140StrategySelect').value;if(v==='')return;data.strategies.splice(+v,1);store.set('strategies',data.strategies);renderStrategy()};
     document.getElementById('t140ApplyFormula').onclick=applyFormula; document.getElementById('t140RunBacktest').onclick=runBacktest;
   }
-  function evalFormula(m,expr){if(!/^[\w\d_+\-*/().,\s]+$/.test(expr))throw Error('Công thức có ký tự không hợp lệ');const names=Object.keys(metricDefs).filter(k=>metricDefs[k].type==='num');const allowed=new Set([...names,'Math','min','max','abs','round','sqrt','pow']);const ids=expr.match(/[A-Za-z_][A-Za-z0-9_]*/g)||[];for(const id of ids){if(!allowed.has(id))throw Error(`Biến ld==='return20Pct')return i>=20?(close/rows[i-20].close-1)*100:NaN;if(field==='return60Pct')return i>=60?(close/rows[i-60].close-1)*100:NaN;return NaN}
+  function evalFormula(m,expr){if(!/^[\w\d_+\-*/().,\s]+$/.test(expr))throw Error('Công thức có ký tự không hợp lệ');const names=Object.keys(metricDefs).filter(k=>metricDefs[k].type==='num');const allowed=new Set([...names,'Math','min','max','abs','round','sqrt','pow']);const ids=expr.match(/[A-Za-z_][A-Za-z0-9_]*/g)||[];for(const id of ids){if(!allowed.has(id))throw Error(`Biến không được hỗ trợ: ${id}`)}const vals=names.map(k=>Number(m[k])||0);return Function(...names,`"use strict"; const {min,max,abs,round,sqrt,pow}=Math; return (${expr});`)(...vals)}
+  function applyFormula(){const name=document.getElementById('t140FormulaName').value.trim()||'Formula';const expression=document.getElementById('t140FormulaExpr').value.trim();data.customFormula={name,expression};store.set('formula',data.customFormula);try{const r=metrics().map(m=>({ticker:m.ticker,v:evalFormula(m,expression)})).filter(x=>Number.isFinite(x.v)).sort((a,b)=>b.v-a.v).slice(0,10);document.getElementById('t140FormulaResult').innerHTML=`<div class="t140-note"><b>${esc(name)} Top 10:</b> ${r.map(x=>`${x.ticker} ${num(x.v,1)}`).join(' • ')}</div>`}catch(e){document.getElementById('t140FormulaResult').innerHTML=`<div class="t140-note t140-warning">${esc(e.message)}</div>`}}
+  function maAt(rows,end,period){if(end+1<period)return NaN;return avg(rows.slice(end-period+1,end+1).map(x=>x.close))}
+  function rsiAt(rows,end,period=14){const start=end-period;if(start<0)return NaN;let g=0,l=0;for(let i=start+1;i<=end;i++){const d=rows[i].close-rows[i-1].close;if(d>=0)g+=d;else l-=d}if(!l)return 100;const rs=g/l;return 100-100/(1+rs)}
+  function historicalValue(rows,i,field){const close=rows[i]?.close;if(!Number.isFinite(close))return NaN; if(field==='close')return close;if(field==='rsi14')return rsiAt(rows,i,14);if(field==='volRatio'){const av=avg(rows.slice(Math.max(0,i-19),i+1).map(x=>x.volume));return av?rows[i].volume/av:NaN}if(field==='return20Pct')return i>=20?(close/rows[i-20].close-1)*100:NaN;if(field==='return60Pct')return i>=60?(close/rows[i-60].close-1)*100:NaN;return NaN}
   function runBacktest(){
     const supported=new Set(['close','rsi14','volRatio','return20Pct','return60Pct']); const usable=data.rules.filter(r=>supported.has(r.field)&&metricDefs[r.field].type==='num'); let trades=[];
     for(const m of metrics()){const rows=m.rows||[];for(let i=200;i<rows.length-20;i+=5){const fake={};usable.forEach(r=>fake[r.field]=historicalValue(rows,i,r.field));if(usable.length&&(data.ruleLogic==='OR'?usable.some(r=>compareRule(fake,r)):usable.every(r=>compareRule(fake,r)))){const fwd=(rows[i+20].close/rows[i].close-1)*100;trades.push(fwd)}}}
@@ -7312,20 +7462,23 @@ return{SCHEMA_VERSION,validateOHLCV,applyAdjustmentFactors,pointInTime,lookAhead
     for(const r of rows){const d=new Date(String(r.date)+'T00:00:00');if(Number.isNaN(d.getTime()))continue;let key;if(mode==='month')key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;else{const x=new Date(d);const day=(x.getDay()+6)%7;x.setDate(x.getDate()-day);key=x.toISOString().slice(0,10)}if(!groups.has(key))groups.set(key,[]);groups.get(key).push(r)}
     return [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([,g])=>({date:g.at(-1).date,open:N(g[0].open),high:Math.max(...g.map(x=>N(x.high))),low:Math.min(...g.map(x=>N(x.low))),close:N(g.at(-1).close),volume:sum(g.map(x=>x.volume))}));
   }
-  function bb(rows,n=20,k=2){const c=rows.map(r=>N(r.close));ifw=c.slice(i-n+1,i+1),m=mean(w),s=stdev(w);if(m)hist.push(100*(2*k*s)/m)}const bwp=percentileRank(bw,hist.slice(-120));return{mid,upper,lower,bandwidth:bw,percentB:pb,bandwidthPercentile:bwp,squeeze:bwp<=20?'EXTREME':bwp<=35?'TIGHT':bwp>=85?'EXPANDED':'NORMhI=i;if(N(w[i].volume)>N(w[volI].volume))volI=i}let breakoutI=Math.max(0,rows.length-60);for(let i=Math.max(20,rows.length-80);i<rows.length;i++){const prior=Math.max(...rows.slice(i-20,i).map(x=>N(x.high)));if(N(rows[i].close)>prior){breakoutI=i;}}
+  function bb(rows,n=20,k=2){const c=rows.map(r=>N(r.close));if(c.length<n)return{};const win=c.slice(-n),mid=mean(win),sd=stdev(win),last=c.at(-1),upper=mid+k*sd,lower=mid-k*sd;const bw=mid?100*(upper-lower)/mid:NaN,pb=upper!==lower?100*(last-lower)/(upper-lower):NaN;const hist=[];for(let i=n-1;i<c.length;i++){const w=c.slice(i-n+1,i+1),m=mean(w),s=stdev(w);if(m)hist.push(100*(2*k*s)/m)}const bwp=percentileRank(bw,hist.slice(-120));return{mid,upper,lower,bandwidth:bw,percentB:pb,bandwidthPercentile:bwp,squeeze:bwp<=20?'EXTREME':bwp<=35?'TIGHT':bwp>=85?'EXPANDED':'NORMAL'} }
+  function anchoredVWAP(rows,startIndex){if(!rows.length)return NaN;let pv=0,v=0;for(let i=Math.max(0,startIndex);i<rows.length;i++){const r=rows[i],vol=N(r.volume),tp=(N(r.high)+N(r.low)+N(r.close))/3;if(finite(tp)&&finite(vol)&&vol>0){pv+=tp*vol;v+=vol}}return v?pv/v:NaN}
+  function avwapSet(rows){if(rows.length<20)return{};const w=rows.slice(-252),off=rows.length-w.length;let lowI=0,highI=0,volI=0;for(let i=1;i<w.length;i++){if(N(w[i].low)<N(w[lowI].low))lowI=i;if(N(w[i].high)>N(w[highI].high))highI=i;if(N(w[i].volume)>N(w[volI].volume))volI=i}let breakoutI=Math.max(0,rows.length-60);for(let i=Math.max(20,rows.length-80);i<rows.length;i++){const prior=Math.max(...rows.slice(i-20,i).map(x=>N(x.high)));if(N(rows[i].close)>prior){breakoutI=i;}}
     return{from52wLow:anchoredVWAP(rows,off+lowI),from52wHigh:anchoredVWAP(rows,off+highI),fromMaxVolume:anchoredVWAP(rows,off+volI),fromBreakout:anchoredVWAP(rows,breakoutI),anchors:{low:off+lowI,high:off+highI,maxVolume:off+volI,breakout:breakoutI}};
   }
-  function volumeIntelligence(rows){if(rows.length<25)return{};const vols=rows.map(r=>N(r.volume)),last=vols.at(-1),a20=mean(vols.slice(-20)),sd=stdev(vols.slice(-60)),z=sd?(last-mean(vols.slice(-60)))/sd:0;let up=0,dn=0,obv=0;const obvArr=[];for(let i=1;i<rows.length;i++){const v=N(rows[i].volume);if(N(rows[i].close)>N(rows[i-1].close)){up+=i>=rows.length-20?v:0;obv+=v}else if(N(rows[i].close)<N(rows[i-1].close)){dn+=i>=rows.length-20?v:0;obv-=v}obvArr.push(obv)}const dry=last<a20*.65,climax=last>a20*2.2;const >ema(wc.slice(0,-1),13)&&wh.at(-1)>=wh.at(-2)?'UP':wc.length>35&&ema(wc,13)<ema(wc.slice(0,-1),13)&&wh.at(-1)<=wh.at(-2)?'DOWN':'MIXED';const daily=e13.at(-1)>e13.at(-2)?'UP':'DOWN';return{impulse,forceIndex:fi,weeklyTrend:weekly,dailyTrend:daily,tripleScreen:weekly==='UP'&&daily==='UP'&&impulse!=='RED'?'PASS':weekly==='DOWN'&&daily==='DOWN'?'AVOID':'WAIT'} }
+  function volumeIntelligence(rows){if(rows.length<25)return{};const vols=rows.map(r=>N(r.volume)),last=vols.at(-1),a20=mean(vols.slice(-20)),sd=stdev(vols.slice(-60)),z=sd?(last-mean(vols.slice(-60)))/sd:0;let up=0,dn=0,obv=0;const obvArr=[];for(let i=1;i<rows.length;i++){const v=N(rows[i].volume);if(N(rows[i].close)>N(rows[i-1].close)){up+=i>=rows.length-20?v:0;obv+=v}else if(N(rows[i].close)<N(rows[i-1].close)){dn+=i>=rows.length-20?v:0;obv-=v}obvArr.push(obv)}const dry=last<a20*.65,climax=last>a20*2.2;const obvTrend=obvArr.length>20?obvArr.at(-1)-obvArr.at(-20):0;const score=clamp(50+(up>dn?15:-10)+(dry?10:0)+(obvTrend>0?15:-10)+(z>0.5?5:0)-(z>2.5?10:0));return{relVol:a20?last/a20:NaN,zScore:z,upDownRatio:dn?up/dn:up?5:1,dryUp:dry,climax,obvTrend,score,label:score>=75?'HEALTHY ACCUMULATION':score>=55?'CONSTRUCTIVE':score>=40?'NEUTRAL':'DISTRIBUTION RISK'} }
+  function elder(rows){if(rows.length<40)return{};const c=rows.map(r=>N(r.close)),e13=emaSeries(c,13),hist=macdHistogram(c),fi=(c.at(-1)-c.at(-2))*N(rows.at(-1).volume);const impulse=(e13.at(-1)>e13.at(-2)&&hist.at(-1)>hist.at(-2))?'GREEN':(e13.at(-1)<e13.at(-2)&&hist.at(-1)<hist.at(-2))?'RED':'BLUE';const w=resample(rows,'week'),wc=w.map(x=>x.close),wh=macdHistogram(wc);const weekly=wc.length>35&&ema(wc,13)>ema(wc.slice(0,-1),13)&&wh.at(-1)>=wh.at(-2)?'UP':wc.length>35&&ema(wc,13)<ema(wc.slice(0,-1),13)&&wh.at(-1)<=wh.at(-2)?'DOWN':'MIXED';const daily=e13.at(-1)>e13.at(-2)?'UP':'DOWN';return{impulse,forceIndex:fi,weeklyTrend:weekly,dailyTrend:daily,tripleScreen:weekly==='UP'&&daily==='UP'&&impulse!=='RED'?'PASS':weekly==='DOWN'&&daily==='DOWN'?'AVOID':'WAIT'} }
   function mtf(rows){const d=rows,w=resample(rows,'week'),m=resample(rows,'month');const tr=a=>{const c=a.map(x=>N(x.close));if(c.length<12)return'NA';const e10=ema(c,10),e30=ema(c,Math.min(30,c.length));const last=c.at(-1);return last>e10&&e10>e30?'UP':last<e10&&e10<e30?'DOWN':'MIXED'};const daily=tr(d),weekly=tr(w),monthly=tr(m);const score=clamp((daily==='UP'?35:daily==='MIXED'?18:0)+(weekly==='UP'?40:weekly==='MIXED'?20:0)+(monthly==='UP'?25:monthly==='MIXED'?12:0));return{daily,weekly,monthly,score,label:score>=80?'ALIGNED BULLISH':score>=55?'CONSTRUCTIVE':score<=25?'ALIGNED BEARISH':'MIXED'} }
-  function weinstein(rows){const w=resample(rows,'week');if(w.length<35)return{stage:'N/A',score:0};const c=w.map(x=>N(x.close)),ma=mean(c.slice(-30)),prev=mean(c.slice(-34,-4)),slope=ma&&prev?(ma/prev-1)*100:0,last=c.at(-1);let stage;if(Math.abs(slope)<2&&Math.abs(last/ma-1)<.08)stage='STAGE 1';else if(last>mast/ma-1):NaN,score} }
-  function vcp(rows){if(rows.length<70)return{confidence:0,detected:false};const c=rows.map(x=>N(x.close)),h=rows.map(x=>N(x.high)),l=rows.map(x=>N(x.low)),v=rows.map(x=>N(x.volume));const lens=[60,30,15,7];const ranges=lens.map(n=>{const hi=Math.max(...h.slice(-n)),lo=Math.min(...l.slice(-n));return 100*(hi/lo-1)});let ordered=0;for(let i=1;i<ranges.length;i++)if(ranges[i]<ranges[i-1]*.9)ordered++;const atrs=[60,30,15,7].map(n=>stdev(c.slice(-n).map((x,i,a)=>i?100*(x/a[i-1]-1):0).slid*14+atrOrdered*8+(volDry?16:0)+(dist>-8&&dist<5?12:0)-(ranges.at(-1)>12?15:0));return{detected:confidence>=65,confidence,contractions:ranges,volDry,pivot,distanceToPivotPct:dist,label:confidence>=85?'HIGH QUALITY VCP':confidence>=65?'VCP CANDIDATE':'NO VCP'} }
+  function weinstein(rows){const w=resample(rows,'week');if(w.length<35)return{stage:'N/A',score:0};const c=w.map(x=>N(x.close)),ma=mean(c.slice(-30)),prev=mean(c.slice(-34,-4)),slope=ma&&prev?(ma/prev-1)*100:0,last=c.at(-1);let stage;if(Math.abs(slope)<2&&Math.abs(last/ma-1)<.08)stage='STAGE 1';else if(last>ma&&slope>1)stage='STAGE 2';else if(Math.abs(slope)<2&&last>=ma*.92)stage='STAGE 3';else stage='STAGE 4';const score=stage==='STAGE 2'?clamp(70+slope*3):stage==='STAGE 1'?45:stage==='STAGE 3'?30:10;return{stage,ma30w:ma,slopePct:slope,priceVsMaPct:ma?100*(last/ma-1):NaN,score} }
+  function vcp(rows){if(rows.length<70)return{confidence:0,detected:false};const c=rows.map(x=>N(x.close)),h=rows.map(x=>N(x.high)),l=rows.map(x=>N(x.low)),v=rows.map(x=>N(x.volume));const lens=[60,30,15,7];const ranges=lens.map(n=>{const hi=Math.max(...h.slice(-n)),lo=Math.min(...l.slice(-n));return 100*(hi/lo-1)});let ordered=0;for(let i=1;i<ranges.length;i++)if(ranges[i]<ranges[i-1]*.9)ordered++;const atrs=[60,30,15,7].map(n=>stdev(c.slice(-n).map((x,i,a)=>i?100*(x/a[i-1]-1):0).slice(1)));let atrOrdered=0;for(let i=1;i<atrs.length;i++)if(atrs[i]<atrs[i-1]*1.05)atrOrdered++;const volDry=mean(v.slice(-10))<mean(v.slice(-50))*.82;const pivot=Math.max(...h.slice(-20,-1));const dist=100*(c.at(-1)/pivot-1);const confidence=clamp(25+ordered*14+atrOrdered*8+(volDry?16:0)+(dist>-8&&dist<5?12:0)-(ranges.at(-1)>12?15:0));return{detected:confidence>=65,confidence,contractions:ranges,volDry,pivot,distanceToPivotPct:dist,label:confidence>=85?'HIGH QUALITY VCP':confidence>=65?'VCP CANDIDATE':'NO VCP'} }
   function localExtrema(arr,type='min',window=3){const out=[];for(let i=window;i<arr.length-window;i++){const s=arr.slice(i-window,i+window+1),v=arr[i];if(type==='min'?v===Math.min(...s):v===Math.max(...s))out.push(i)}return out}
   function oneilPatterns(rows){if(rows.length<80)return{};const w=rows.slice(-220),c=w.map(x=>N(x.close)),h=w.map(x=>N(x.high)),l=w.map(x=>N(x.low)),v=w.map(x=>N(x.volume));const maxI=h.indexOf(Math.max(...h.slice(0,Math.floor(h.length*.55))));const left=h[maxI]||Math.max(...h);let bottomI=maxI+l.slice(maxI,Math.floor(h.length*.82)).indexOf(Math.min(...l.slice(maxI,Math.floor(h.length*.82))));if(bottomI<maxI)bottomI=maxI;const bottom=l[bottomI]||Math.min(...l);const depth=left?100*(1-bottom/left):NaN;const recentHigh=Math.max(...h.slice(-45,-5)),recovery=left?100*recentHigh/left:0;const handleHigh=Math.max(...h.slice(-20)),handleLow=Math.min(...l.slice(-20)),handleDepth=handleHigh?100*(1-handleLow/handleHigh):NaN;const cupShape=maxI<h.length*.35&&bottomI>h.length*.20&&bottomI<h.length*.78&&depth>=10&&depth<=38&&recovery>=88&&handleDepth<=15;const volDry=mean(v.slice(-10))<mean(v.slice(-50))*.85;const cupConf=clamp((cupShape?55:20)+(volDry?15:0)+(handleDepth<=10?12:0)+(c.at(-1)>=recentHigh*.96?12:0));
     const range35=100*(Math.max(...h.slice(-35))/Math.min(...l.slice(-35))-1);const flatConf=clamp((range35<=15?60:Math.max(0,45-(range35-15)*2))+(volDry?20:0)+(c.at(-1)>Math.max(...h.slice(-35))*0.94?15:0));
     const mins=localExtrema(l,'min',3).filter(i=>i>w.length-100);let dbl=0;for(let a=0;a<mins.length;a++)for(let b=a+1;b<mins.length;b++){const i=mins[a],j=mins[b];if(j-i<10||j-i>65)continue;const d=Math.abs(l[i]/l[j]-1);const mid=Math.max(...h.slice(i,j+1));if(d<.08&&mid>Math.max(l[i],l[j])*1.08)dbl=Math.max(dbl,clamp(78-d*300+(c.at(-1)>mid*.95?15:0)))}
     return{cupWithHandle:{confidence:cupConf,detected:cupConf>=70,depthPct:depth,handleDepthPct:handleDepth},flatBase:{confidence:flatConf,detected:flatConf>=70,rangePct:range35},doubleBottom:{confidence:dbl,detected:dbl>=70},best:[['CUP WITH HANDLE',cupConf],['FLAT BASE',flatConf],['DOUBLE BOTTOM',dbl]].sort((a,b)=>b[1]-a[1])[0]};
   }
-  function wyckoff(rows){if(rows.length<80)return{};const recent=rows.slice(-35);let spring=null,upthrust=null,sos=null;for(let j=1;j<recent.length;low)<sup*.99&&N(r.close)>sup)spring={index:i,date:r.date,level:sup};if(N(r.high)>res*1.01&&N(r.close)<res)upthrust={index:i,date:r.date,level:res};if(N(r.close)>res&&N(r.volume)>av*1.25)sos={index:i,date:r.date,level:res}}
+  function wyckoff(rows){if(rows.length<80)return{};const recent=rows.slice(-35);let spring=null,upthrust=null,sos=null;for(let j=1;j<recent.length;j++){const i=rows.length-recent.length+j,r=rows[i],prior=rows.slice(Math.max(0,i-60),i);if(prior.length<30)continue;const sup=Math.min(...prior.map(x=>N(x.low))),res=Math.max(...prior.map(x=>N(x.high))),av=mean(prior.slice(-20).map(x=>N(x.volume)));if(N(r.low)<sup*.99&&N(r.close)>sup)spring={index:i,date:r.date,level:sup};if(N(r.high)>res*1.01&&N(r.close)<res)upthrust={index:i,date:r.date,level:res};if(N(r.close)>res&&N(r.volume)>av*1.25)sos={index:i,date:r.date,level:res}}
     let lps=null;if(sos){const after=rows.slice(sos.index+1);for(let j=0;j<after.length;j++){const r=after[j],av=mean(rows.slice(Math.max(0,sos.index-20),sos.index).map(x=>N(x.volume)));if(N(r.low)<=sos.level*1.04&&N(r.close)>=sos.level*.98&&N(r.volume)<av*.9)lps={index:sos.index+1+j,date:r.date,level:sos.level}}}
     let score=50;if(spring)score+=20;if(sos)score+=20;if(lps)score+=10;if(upthrust)score-=30;score=clamp(score);let phase=spring&&!upthrust?'ACCUMULATION C':sos?'MARKUP / SOS':upthrust?'DISTRIBUTION RISK':'NEUTRAL RANGE';return{spring,upthrust,sos,lps,score,phase} }
   function oneilMarket(rows){if(rows.length<40)return{};const r=rows.slice(-30);let dist=0;for(let i=1;i<r.length;i++){const ch=N(r[i].close)/N(r[i-1].close)-1;if(ch<=-.002&&N(r[i].volume)>N(r[i-1].volume))dist++}let rallyStart=-1;for(let i=r.length-12;i<r.length-3;i++){if(i<1)continue;if(N(r[i].close)>N(r[i-1].close)){rallyStart=i;break}}let ftd=null;if(rallyStart>=0){for(let i=rallyStart+3;i<r.length;i++){const ch=N(r[i].close)/N(r[i-1].close)-1;if(ch>=.012&&N(r[i].volume)>N(r[i-1].volume)){ftd={date:r[i].date,day:i-rallyStart+1,changePct:ch*100};break}}}const trend=returns(r.map(x=>N(x.close)),10);let status=ftd&&dist<=4?'CONFIRMED UPTREND':rallyStart>=0?'RALLY ATTEMPT':trend<-.04?'MARKET IN CORRECTION':'UPTREND UNDER PRESSURE';return{distributionDays:dist,rallyAttempt:rallyStart>=0?r[rallyStart].date:null,followThrough:ftd,status,score:clamp(75-(dist*9)+(ftd?20:0)+(trend>0?10:-10))} }
@@ -7629,4 +7782,3 @@ return{SCHEMA_VERSION,validateOHLCV,applyAdjustmentFactors,pointInTime,lookAhead
 
 </body>
 </html>
-
