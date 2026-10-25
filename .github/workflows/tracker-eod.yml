@@ -29,15 +29,31 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Python for the scheduled refresh
-        if: github.event_name != 'push'
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install data dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip check
+          python -c "from vnstock import Listing, Quote; from importlib.metadata import version; print('vnstock', version('vnstock'))"
+
+      - name: Check provider before refreshing the shared snapshot
         if: github.event_name != 'push'
-        run: python -m pip install --upgrade pip pandas vnstock
+        timeout-minutes: 5
+        run: |
+          python tracker-tools/tracker_data_exporter.py --sessions 320 --symbols FPT --source KBS --sleep 6 --retries 0 --output work/preflight.csv --errors-output work/preflight-errors.csv --quality-output work/preflight-quality.csv
+          python - <<'PY'
+          import pandas as pd
+          data = pd.read_csv('work/preflight.csv')
+          for ticker in ('VNINDEX', 'FPT'):
+              rows = data.loc[data['ticker'].eq(ticker)]
+              if len(rows) < 320:
+                  raise SystemExit(f'{ticker}: expected 320 sessions, got {len(rows)}')
+          print('Provider preflight passed: VNINDEX and FPT have 320 sessions')
+          PY
 
       - name: Download 320 sessions from the shared source
         if: github.event_name != 'push'
