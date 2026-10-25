@@ -41,7 +41,6 @@ jobs:
           python -c "from vnstock import Listing, Quote; from importlib.metadata import version; print('vnstock', version('vnstock'))"
 
       - name: Check provider before refreshing the shared snapshot
-        if: github.event_name != 'push'
         timeout-minutes: 5
         run: |
           python tracker-tools/tracker_data_exporter.py --sessions 320 --symbols FPT --source KBS --sleep 6 --retries 0 --output work/preflight.csv --errors-output work/preflight-errors.csv --quality-output work/preflight-quality.csv
