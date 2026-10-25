@@ -40,6 +40,19 @@ jobs:
           python -m pip check
           python -c "from vnstock import Listing, Quote; from importlib.metadata import version; print('vnstock', version('vnstock'))"
 
+      - name: Authenticate Vnstock for GitHub Actions
+        env:
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import vnstock
+          key = os.environ.get('VNSTOCK_API_KEY', '').strip()
+          if not key:
+              raise SystemExit('Add the VNSTOCK_API_KEY repository Actions secret; Vnstock requires an API key in CI.')
+          vnstock.login(key)
+          PY
+
       - name: Check provider before refreshing the shared snapshot
         timeout-minutes: 5
         run: |
